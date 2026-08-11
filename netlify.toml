@@ -4,7 +4,11 @@
 # if the site is ever rebuilt from scratch.
 
 [build]
-  command = "npm run build"
+  # Deletes any node_modules that came from the repo before installing.
+  # Files installed on Windows arrive without the Linux "executable"
+  # permission, which makes vite fail with "Permission denied". Starting
+  # from a clean install sidesteps that no matter what is committed.
+  command = "rm -rf node_modules && npm install --no-audit --no-fund && npx vite build"
   publish = "dist"
 
 [build.environment]
