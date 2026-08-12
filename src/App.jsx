@@ -127,7 +127,7 @@ export default function App() {
             {tab === "swaps" && (
               <Swaps pool={pool} entry={entries.find(e => e.id === entryId) || null} />
             )}
-            {tab === "board" && <Leaderboard pool={pool} />}
+            {tab === "board" && <Leaderboard pool={pool} isAdmin={isAdmin} />}
             {tab === "rules" && <Rules pool={pool} />}
             {tab === "admin" && isAdmin && <Admin pool={pool} onPoolChange={setPool} />}
           </>

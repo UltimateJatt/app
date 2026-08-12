@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../supabase.js";
 
-export default function Leaderboard({ pool }) {
+export default function Leaderboard({ pool, isAdmin }) {
   const [rows, setRows] = useState([]);
   const [weekly, setWeekly] = useState([]);
   const [winners, setWinners] = useState([]);
@@ -88,12 +88,17 @@ export default function Leaderboard({ pool }) {
   }
 
   const noneScored = playedWeeks.length === 0;
+  const rostersOpen = isAdmin ||
+    (!!pool.picks_lock_at && new Date(pool.picks_lock_at) <= new Date());
 
   return (
     <>
       <div className="card">
         <div className="card-head">
           <h2>Standings</h2>
+          {isAdmin && !(!!pool.picks_lock_at && new Date(pool.picks_lock_at) <= new Date()) && (
+            <span className="tag tag-rookie">Admin view: rosters visible</span>
+          )}
           <button className="btn-sm" onClick={() => setShowWinners(true)}>Weekly winners</button>
           <div style={{ flex: 1 }} />
           <select style={{ maxWidth: 170 }} value={week} aria-label="Week"
@@ -109,11 +114,19 @@ export default function Leaderboard({ pool }) {
             aria-label="Find an entry" onChange={e => setSearch(e.target.value)} />
         </div>
 
-        {noneScored && (
+        {(!rostersOpen || noneScored) && (
           <div className="card-body" style={{ paddingBottom: 0 }}>
-            <div className="msg msg-info" style={{ marginBottom: 0 }}>
-              No weeks have been scored yet. Totals fill in after the first games.
-            </div>
+            {!rostersOpen && (
+              <div className="msg msg-info" style={{ marginBottom: noneScored ? 10 : 0 }}>
+                Rosters stay hidden until picks lock, so nobody can draft off
+                what everyone else took. Yours is on the My picks tab.
+              </div>
+            )}
+            {noneScored && (
+              <div className="msg msg-info" style={{ marginBottom: 0 }}>
+                No weeks have been scored yet. Totals fill in after the first games.
+              </div>
+            )}
           </div>
         )}
 
@@ -132,10 +145,13 @@ export default function Leaderboard({ pool }) {
             </thead>
             <tbody>
               {display.map(r => (
-                <tr key={r.entry_id} style={{ cursor: "pointer" }}
-                  onClick={() => setOpenEntry(r)}
-                  tabIndex={0} role="button"
-                  onKeyDown={e => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), setOpenEntry(r))}>
+                <tr key={r.entry_id}
+                  style={{ cursor: rostersOpen ? "pointer" : "default" }}
+                  onClick={() => rostersOpen && setOpenEntry(r)}
+                  tabIndex={rostersOpen ? 0 : -1}
+                  role={rostersOpen ? "button" : undefined}
+                  onKeyDown={e => rostersOpen && (e.key === "Enter" || e.key === " ")
+                    && (e.preventDefault(), setOpenEntry(r))}>
                   <td className="num rank">{week === "total" ? r.overall_rank : r.week_rank}</td>
                   <td>
                     <div style={{ fontWeight: 600 }}>{r.entry_name}</div>
