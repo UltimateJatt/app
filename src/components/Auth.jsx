@@ -12,11 +12,28 @@ export default function Auth() {
   const [notice, setNotice] = useState("");
 
   const isRegister = mode === "register";
+  const isForgot = mode === "forgot";
 
   async function submit() {
     setError(""); setNotice("");
 
     if (!email.trim()) return setError("Enter your email address.");
+
+    if (isForgot) {
+      setBusy(true);
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: window.location.origin,
+      });
+      setBusy(false);
+      if (error) return setError(friendly(error.message));
+      // Same message whether or not the address has an account, so this
+      // cannot be used to find out who is in the pool.
+      setNotice("If that email has an account, a reset link is on its way. " +
+                "Check your junk folder if it does not arrive in a few minutes.");
+      setMode("signin");
+      return;
+    }
+
     if (password.length < 8) return setError("Password must be at least 8 characters.");
     if (isRegister && !displayName.trim()) return setError("Enter the name you want shown on the leaderboard.");
     if (isRegister && !inviteCode.trim()) return setError("Enter the invite code you were given.");
@@ -56,6 +73,8 @@ export default function Auth() {
   }
 
   function friendly(msg) {
+    if (/rate|too many|seconds/i.test(msg))
+      return "Too many requests just now. Wait a minute and try again.";
     if (/invalid login/i.test(msg)) return "That email and password combination doesn't match an account.";
     if (/already registered/i.test(msg)) return "An account already exists for that email. Sign in instead.";
     if (/confirm/i.test(msg)) return "Confirm your email address first. Check your inbox for the link.";
@@ -100,6 +119,7 @@ export default function Auth() {
                 onKeyDown={e => e.key === "Enter" && submit()} />
             </div>
 
+            {!isForgot && (
             <div className="field">
               <label htmlFor="pw">Password</label>
               <input id="pw" type="password" value={password}
@@ -107,17 +127,44 @@ export default function Auth() {
                 onChange={e => setPassword(e.target.value)}
                 onKeyDown={e => e.key === "Enter" && submit()} />
             </div>
+            )}
+
+            {isForgot && (
+              <p style={{ fontSize: 14, color: "var(--chalk-dim)", marginTop: 0 }}>
+                Enter the email you signed up with and we'll send a link to set a
+                new password.
+              </p>
+            )}
 
             <button className="btn-primary" style={{ width: "100%" }}
               onClick={submit} disabled={busy}>
-              {busy ? "Working..." : isRegister ? "Create account" : "Sign in"}
+              {busy ? "Working..."
+                : isRegister ? "Create account"
+                : isForgot ? "Send reset link"
+                : "Sign in"}
             </button>
 
+            {!isRegister && !isForgot && (
+              <div className="auth-switch" style={{ marginTop: 12 }}>
+                <button onClick={() => { setMode("forgot"); setError(""); setNotice(""); }}>
+                  Forgot your password?
+                </button>
+              </div>
+            )}
+
             <div className="auth-switch">
-              {isRegister ? "Already have an account?" : "New to the pool?"}{" "}
-              <button onClick={() => { setMode(isRegister ? "signin" : "register"); setError(""); }}>
-                {isRegister ? "Sign in" : "Create one"}
-              </button>
+              {isForgot ? (
+                <button onClick={() => { setMode("signin"); setError(""); }}>
+                  Back to sign in
+                </button>
+              ) : (
+                <>
+                  {isRegister ? "Already have an account?" : "New to the pool?"}{" "}
+                  <button onClick={() => { setMode(isRegister ? "signin" : "register"); setError(""); }}>
+                    {isRegister ? "Sign in" : "Create one"}
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>

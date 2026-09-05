@@ -6,6 +6,7 @@ import Leaderboard from "./components/Leaderboard.jsx";
 import Rules from "./components/Rules.jsx";
 import Admin from "./components/Admin.jsx";
 import Swaps from "./components/Swaps.jsx";
+import ResetPassword from "./components/ResetPassword.jsx";
 
 const SEASON = 2026;
 
@@ -19,10 +20,18 @@ export default function App() {
   const [tab, setTab] = useState("picks");
   const [error, setError] = useState("");
   const [ready, setReady] = useState(false);
+  // Set when someone arrives from a password reset email. Supabase puts
+  // type=recovery in the URL and signs them in with a short-lived session,
+  // so we must show the new-password screen instead of the normal app.
+  const [recovering, setRecovering] = useState(
+    () => window.location.hash.includes("type=recovery"));
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
+    const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
+      if (event === "PASSWORD_RECOVERY") setRecovering(true);
+      setSession(s);
+    });
     return () => sub.subscription.unsubscribe();
   }, []);
 
@@ -60,6 +69,9 @@ export default function App() {
   }
 
   if (session === undefined) return <div className="empty">Loading...</div>;
+  if (recovering && session) {
+    return <ResetPassword onDone={() => { setRecovering(false); loadContext(); }} />;
+  }
   if (!session) return <Auth />;
 
   const isAdmin = !!profile?.is_admin;
