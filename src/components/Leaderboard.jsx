@@ -29,7 +29,7 @@ export default function Leaderboard({ pool, isAdmin }) {
           .select("week, entry_id, entry_name, points, winner_count, payout")
           .eq("pool_id", pool.id).order("week"),
         supabase.from("v_week_status")
-          .select("week, status, missing_players, top_score")
+          .select("week, status, teams_reported, top_score")
           .eq("pool_id", pool.id).order("week"),
       ]);
       if (l.error) throw l.error;
@@ -43,10 +43,14 @@ export default function Leaderboard({ pool, isAdmin }) {
     } finally { setLoading(false); }
   }
 
-  const playedWeeks = useMemo(() => {
-    const s = new Set(weekly.filter(w => Number(w.points) > 0).map(w => w.week));
-    return [...s].sort((a, b) => a - b);
-  }, [weekly]);
+  const statusOf = useMemo(
+    () => Object.fromEntries(weekStatus.map(s => [s.week, s])), [weekStatus]);
+
+  // A week is selectable once any game in it has been played.
+  const playedWeeks = useMemo(
+    () => weekStatus.filter(s => s.status !== "NOT PLAYED")
+                    .map(s => s.week).sort((a, b) => a - b),
+    [weekStatus]);
 
   const weekMap = useMemo(() => {
     const m = {};
@@ -160,9 +164,9 @@ export default function Leaderboard({ pool, isAdmin }) {
                   {week !== "total" && (
                     <td className="r num" style={{ color: "var(--amber)", fontSize: 16 }}>
                       {r.week_points != null ? Number(r.week_points).toFixed(2) : "—"}
-                      {r.missing > 0 && (
+                      {r.missing > 0 && statusOf[Number(week)]?.status !== "FINAL" && (
                         <div style={{ fontSize: 11, color: "var(--rust)" }}>
-                          {r.missing} missing
+                          {r.missing} still to play
                         </div>
                       )}
                     </td>
@@ -316,14 +320,16 @@ function WinnersDialog({ winners, status, weeks, onClose }) {
                 const ws = byWeek[wk];
                 const st = statusOf[wk];
                 if (!ws) {
-                  const label = !st ? "Not played"
-                    : st.status === "PARTIAL" ? `Waiting on data (${st.missing_players} players)`
-                    : st.status === "NOT PLAYED" ? "Not played" : "Pending";
+                  const label =
+                    !st || st.status === "NOT PLAYED" ? "Not played yet"
+                    : st.status === "IN PROGRESS"
+                      ? `Games still to come (${st.teams_reported} of 32 teams reported)`
+                      : "No scores recorded";
                   return (
                     <tr key={wk}>
                       <td className="num" style={{ color: "var(--slate)" }}>{wk}</td>
                       <td colSpan={3} style={{
-                        color: st?.status === "PARTIAL" ? "var(--rust)" : "var(--slate)",
+                        color: st?.status === "IN PROGRESS" ? "var(--amber)" : "var(--slate)",
                         fontSize: 14 }}>{label}</td>
                     </tr>
                   );
