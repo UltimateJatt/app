@@ -23,7 +23,7 @@ export default function Swaps({ pool, entry }) {
       const [r, b, h, w] = await Promise.all([
         supabase.rpc("entry_roster_for_swaps", { p_entry_id: entry.id }),
         supabase.from("v_tier_board")
-          .select("slot_code, player_id, full_name, team, is_rookie, points_2025, ppg_2025, data_quality")
+          .select("slot_code, player_id, full_name, team, is_rookie, points_now, ppg_now, games_now, weeks_done, form_points, form_games, status_now, points_2025")
           .eq("pool_id", pool.id),
         supabase.from("swaps")
           .select("slot_code, out_player_id, in_player_id, effective_week, fee, created_at")
@@ -45,7 +45,8 @@ export default function Swaps({ pool, entry }) {
   const bySlot = useMemo(() => {
     const m = {};
     for (const p of board) (m[p.slot_code] ??= []).push(p);
-    for (const k in m) m[k].sort((a, b) => (b.points_2025 ?? -1) - (a.points_2025 ?? -1));
+    // best this season first, which is the only ordering that helps in week 10
+    for (const k in m) m[k].sort((a, b) => (b.points_now ?? -1) - (a.points_now ?? -1));
     return m;
   }, [board]);
 
@@ -188,6 +189,7 @@ export default function Swaps({ pool, entry }) {
 
       {openSlot && (
         <SwapPicker slot={openSlot} week={week} fee={pool.swap_fee}
+          current={openSlot.season_pts}
           options={(bySlot[openSlot.slot_code] || []).filter(p => p.player_id !== openSlot.player_id)}
           busy={busy}
           onPick={p => doSwap(openSlot.slot_code, p.player_id, openSlot.full_name, p.full_name)}
@@ -197,7 +199,7 @@ export default function Swaps({ pool, entry }) {
   );
 }
 
-function SwapPicker({ slot, week, fee, options, busy, onPick, onClose }) {
+function SwapPicker({ slot, week, fee, options, busy, onPick, onClose, current }) {
   const [q, setQ] = useState("");
   useEffect(() => {
     const onKey = e => e.key === "Escape" && onClose();
@@ -220,6 +222,9 @@ function SwapPicker({ slot, week, fee, options, busy, onPick, onClose }) {
               {slot.slot_code.replace("_T", " ")} · from week {week}
               {Number(fee) > 0 ? ` · ${money(fee)}` : ""}
             </div>
+            <div style={{ fontSize: 12, color: "var(--slate)", marginTop: 4 }}>
+              Replacing {slot.full_name}, {Number(slot.season_pts).toFixed(2)} points this season
+            </div>
           </div>
           <div style={{ flex: 1 }} />
           <button className="btn-sm" onClick={onClose}>Cancel</button>
@@ -230,23 +235,42 @@ function SwapPicker({ slot, week, fee, options, busy, onPick, onClose }) {
         </div>
         <div className="modal-body" style={{ padding: 12 }}>
           {list.length === 0 && <div className="empty"><p>No players match.</p></div>}
-          {list.map(p => (
-            <button key={p.player_id} className="pick-row" disabled={busy}
-              onClick={() => onPick(p)}>
-              <span>
-                <span className="pick-name">{p.full_name}</span>
-                <span className="pick-meta">{p.team || "Free agent"}</span>
-              </span>
-              {p.data_quality === "ROOKIE"
-                ? <span className="tag tag-rookie">Rookie</span> : <span />}
-              <span className="pick-pts">
-                {p.points_2025 != null
-                  ? <span className="big num">{p.points_2025.toFixed(1)}</span>
-                  : <span className="sub">—</span>}
-                <span className="sub">2025</span>
-              </span>
-            </button>
-          ))}
+          {list.map(p => {
+            const better = current != null && p.points_now != null
+              && Number(p.points_now) > Number(current);
+            return (
+              <button key={p.player_id} className="pick-row" disabled={busy}
+                onClick={() => onPick(p)}>
+                <span>
+                  <span className="pick-name">{p.full_name}</span>
+                  <span className="pick-meta">
+                    {p.team || "Free agent"}
+                    {p.form_points != null &&
+                      ` · last ${p.form_games} wks ${Number(p.form_points).toFixed(1)}`}
+                  </span>
+                </span>
+                {p.status_now === "NOT PLAYED"
+                  ? <span className="tag tag-nodata">No 2026 games</span>
+                  : p.status_now === "MISSED TIME"
+                  ? <span className="tag tag-nodata">
+                      {p.games_now} of {p.weeks_done} wks
+                    </span>
+                  : better
+                  ? <span className="tag tag-rookie">Ahead of yours</span>
+                  : <span />}
+                <span className="pick-pts">
+                  {p.points_now != null
+                    ? <>
+                        <span className="big num">{Number(p.points_now).toFixed(1)}</span>
+                        <span className="sub num">
+                          {Number(p.ppg_now).toFixed(1)}/g · {p.games_now}g
+                        </span>
+                      </>
+                    : <span className="sub">no 2026 points</span>}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>
