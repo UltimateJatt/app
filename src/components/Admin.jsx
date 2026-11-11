@@ -18,6 +18,8 @@ export default function Admin({ pool, onPoolChange }) {
   const [overrides, setOverrides] = useState({});
   const [modelEntries, setModelEntries] = useState(null);
   const [codes, setCodes] = useState([]);
+  const [swaps, setSwaps] = useState([]);
+  const [swapFees, setSwapFees] = useState([]);
   const [newCode, setNewCode] = useState("");
   const [newMax, setNewMax] = useState("");
 
@@ -26,17 +28,21 @@ export default function Admin({ pool, onPoolChange }) {
   async function load() {
     setLoading(true); setError("");
     try {
-      const [e, m, p, c] = await Promise.all([
+      const [e, m, p, c, sw, sf] = await Promise.all([
         supabase.rpc("admin_entries", { p_pool_id: pool.id }),
         supabase.from("v_pool_money").select("*").eq("pool_id", pool.id).maybeSingle(),
         supabase.from("prize_allocations").select("*").eq("pool_id", pool.id).order("sort_order"),
         supabase.from("invite_codes").select("*").eq("pool_id", pool.id).order("created_at"),
+        supabase.rpc("admin_swaps", { p_pool_id: pool.id }),
+        supabase.rpc("admin_swap_fees", { p_pool_id: pool.id }),
       ]);
       if (e.error) throw e.error;
       if (m.error) throw m.error;
       if (p.error) throw p.error;
       setEntries(e.data || []); setPot(m.data); setPrizes(p.data);
       setCodes(c.error ? [] : (c.data || []));
+      setSwaps(sw.error ? [] : (sw.data || []));
+      setSwapFees(sf.error ? [] : (sf.data || []));
     } catch (err) {
       setError("Could not load admin data. " + err.message);
     } finally { setLoading(false); }
@@ -90,6 +96,32 @@ export default function Admin({ pool, onPoolChange }) {
     const { error } = await supabase.rpc("restore_entry", { p_entry_id: e.entry_id });
     if (error) setError(error.message);
     else { setNotice(`${e.entry_name} restored.`); load(); }
+  }
+
+  async function toggleSwapPaid(sw) {
+    setError(""); setNotice("");
+    const next = !sw.fee_paid;
+    setSwaps(list => list.map(x =>
+      x.swap_id === sw.swap_id ? { ...x, fee_paid: next } : x));
+    const { error } = await supabase.rpc("set_swap_fee_paid", {
+      p_swap_id: sw.swap_id, p_paid: next,
+    });
+    if (error) {
+      setSwaps(list => list.map(x =>
+        x.swap_id === sw.swap_id ? { ...x, fee_paid: !next } : x));
+      setError("Could not record that. " + error.message);
+    } else load();
+  }
+
+  async function markEntrySwapsPaid(entryId, entryName) {
+    if (!confirm(`Mark every swap fee on "${entryName}" as paid?`)) return;
+    setBusy(true); setError(""); setNotice("");
+    const { data, error } = await supabase.rpc("set_entry_swaps_paid", {
+      p_entry_id: entryId, p_paid: true,
+    });
+    if (error) setError(error.message);
+    else { setNotice(`${data} swap ${data === 1 ? "fee" : "fees"} marked paid.`); await load(); }
+    setBusy(false);
   }
 
   async function applyPlan() {
@@ -166,7 +198,7 @@ export default function Admin({ pool, onPoolChange }) {
           <div className="stat-grid">
             <Stat label="Entries paid" value={`${pot?.paid_entries ?? 0} of ${entries.filter(e => e.is_active).length}`} />
             <Stat label="Entry money" value={money(pot?.entry_revenue)} />
-            <Stat label="Swap fees" value={money(pot?.swap_revenue)} />
+            <Stat label="Swap fees in" value={money(pot?.swap_revenue)} />
             <Stat label="Total pot" value={money(pot?.total_pot)} accent />
           </div>
 
@@ -399,6 +431,99 @@ export default function Admin({ pool, onPoolChange }) {
           )}
         </div>
       </div>
+
+      {/* ---- swaps ---- */}
+      {swaps.length > 0 && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="card-head">
+            <h2>Swaps</h2>
+            <div style={{ flex: 1 }} />
+            <span className="eyebrow">
+              {swaps.length} swap{swaps.length === 1 ? "" : "s"}
+              {" · "}
+              {money(swapFees.reduce((a, f) => a + Number(f.fees_paid), 0))} collected
+              {swapFees.reduce((a, f) => a + Number(f.fees_outstanding), 0) > 0 &&
+                `, ${money(swapFees.reduce((a, f) => a + Number(f.fees_outstanding), 0))} owing`}
+            </span>
+          </div>
+
+          <div className="card-body" style={{ paddingBottom: 0 }}>
+            <p style={{ color: "var(--chalk-dim)", fontSize: 14, marginTop: 0 }}>
+              Only swap fees you have marked paid count toward the pot, the same rule
+              entry fees follow. Nothing here can be undone by the member: a swap is a
+              permanent record of who went out and who came in.
+            </p>
+          </div>
+
+          {swapFees.filter(f => Number(f.fees_outstanding) > 0).length > 0 && (
+            <div className="card-body" style={{ paddingTop: 0, paddingBottom: 0 }}>
+              <div className="eyebrow" style={{ marginBottom: 8 }}>Owing</div>
+              <table className="tbl" style={{ marginBottom: 14 }}>
+                <thead>
+                  <tr>
+                    <th>Entry</th><th className="r">Swaps</th>
+                    <th className="r">Owing</th><th className="r"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {swapFees.filter(f => Number(f.fees_outstanding) > 0).map(f => (
+                    <tr key={f.entry_id}>
+                      <td style={{ fontWeight: 600 }}>{f.entry_name}</td>
+                      <td className="r num">{f.swaps_made}</td>
+                      <td className="r num" style={{ color: "var(--rust)" }}>
+                        {money(f.fees_outstanding)}
+                      </td>
+                      <td className="r">
+                        <button className="btn-sm" disabled={busy}
+                          onClick={() => markEntrySwapsPaid(f.entry_id, f.entry_name)}>
+                          Mark all paid
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div className="card-body" style={{ padding: 0, overflowX: "auto" }}>
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th>Entry</th><th>Slot</th><th>Out</th><th>In</th>
+                  <th className="r">Wk</th><th className="r">Fee</th>
+                </tr>
+              </thead>
+              <tbody>
+                {swaps.map(sw => (
+                  <tr key={sw.swap_id}>
+                    <td>
+                      <div style={{ fontWeight: 600 }}>{sw.entry_name}</div>
+                      <div style={{ fontSize: 12, color: "var(--slate)" }}>{sw.owner_name}</div>
+                    </td>
+                    <td className="eyebrow">{sw.slot_code.replace("_T", " ")}</td>
+                    <td style={{ color: "var(--slate)" }}>{sw.out_name || sw.out_player_id}</td>
+                    <td style={{ fontWeight: 600 }}>{sw.in_name || sw.in_player_id}</td>
+                    <td className="r num">{sw.effective_week}</td>
+                    <td className="r">
+                      {Number(sw.fee) > 0 ? (
+                        <button className="btn-sm" onClick={() => toggleSwapPaid(sw)}
+                          style={sw.fee_paid
+                            ? { background: "rgba(78,201,138,.15)", borderColor: "var(--mint)", color: "var(--mint)" }
+                            : {}}>
+                          {sw.fee_paid ? money(sw.fee) + " paid" : "Mark " + money(sw.fee)}
+                        </button>
+                      ) : (
+                        <span className="num" style={{ color: "var(--slate)" }}>free</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* ---- invites ---- */}
       <div className="card" style={{ marginBottom: 16 }}>
